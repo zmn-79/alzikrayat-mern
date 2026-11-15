@@ -23,7 +23,7 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
-      <footer className="footer">Alzikrayat - MERN Edition · Advanced Web Technologies, Project 3</footer>
+      <footer className="footer">Alzikrayat - MERN Edition · © {new Date().getFullYear()} · Advanced Web Technologies, Project 3</footer>
     </>
   );
 }
