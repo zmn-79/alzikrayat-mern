@@ -13,7 +13,7 @@ export default function Gallery() {
   return (
     <section>
       <div className="section-head">
-        <h1>Gallery</h1>
+        <h1>Gallery{!loading && !error && ` (${photos.length})`}</h1>
         {isAuthenticated && <Link to="/upload" className="btn btn-primary">+ Upload photo</Link>}
       </div>
       {loading && <Spinner label="Loading photos…" />}
