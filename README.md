@@ -91,7 +91,8 @@ alzikrayat-mern/
 ```bash
 # 1. Backend
 cd server
-npm install
+
+
 cp .env.example .env        # then edit .env (see table below)
 npm run dev                 # API on http://localhost:5000  (or: npm start)
 
@@ -194,3 +195,120 @@ The 15 tests cover registration (hashing, duplicates, validation, malformed JSON
 | README explains setup and environment variables | ✔ this file |
 | No Next/Remix/NestJS/Prisma/Sequelize/admin dashboards | ✔ |
 | GitHub with meaningful commit history for `/client` and `/server` | ✔ one commit per feature area |
+
+---
+
+# Project 4 — Track D: Real-Time WebSocket (Socket.io)
+
+## Selected track and rationale
+
+I chose **Track D (Socket.io)** because the app already has the exact use case it is made for: several people look at the same photo and talk about it in the comments. Before, a comment appeared only after a reload; now it appears instantly for everybody viewing that photo. The feature also fits the existing architecture without touching the data tier: the REST API stays the single write path, and Socket.io only *announces* what the API has already saved.
+
+Implemented: Socket.io server on the same HTTP server as Express, `comment:new` broadcast per photo room, the optional live `photo:new` notification (toast + the card appears in Gallery/Home), `photo:deleted`, a `socket.io-client` connection in React (`useEffect`), room-based broadcasting, and a "Live / Reconnecting…" indicator.
+
+## Architecture
+
+```
+Browser A ──POST /api/photos/:id/comments──▶ Express ─▶ Joi + JWT ─▶ MongoDB
+                                                  │ (saved OK)
+                                                  ▼
+                                   emitCommentNew()  (server/socket/index.js)
+                                                  │  io.to("photo:<id>")
+                         ┌────────────────────────┴───────────────┐
+                         ▼                                        ▼
+                  Browser A (room)                         Browser B (room)
+          already has it from REST -> de-duplicated        appends it, no reload
+```
+
+Design decisions:
+
+- **REST is the only write path.** Clients never create comments or photos through the socket (the server has no such handler). Validation, JWT authentication and ownership rules therefore exist in one place only. Controllers emit **after** the database write succeeded, so a failed request (400/401/403/404) never produces an event.
+- **One room per photo:** `photo:<photoId>`. Clients send `photo:join` / `photo:leave`; the server validates the id (24-hex ObjectId), lower-cases it, ignores or rejects invalid ones through the acknowledgement, and limits a socket to 10 photo rooms.
+- **Anonymous read-only subscription.** Reading is public in this app, so sockets need no login. No JWT is read in the handshake: the `photo:new` payload already contains the uploader's id, so the client can skip its own toast without the server trusting anything from the client. No `userId` sent by a client is ever used.
+- **Failure isolation.** Emitting is wrapped in `try/catch` and does nothing when Socket.io is not initialised, so REST works exactly as before if sockets fail.
+
+### Events
+
+| Event | Direction | Payload | Room / audience |
+|---|---|---|---|
+| `photo:join` | client → server | `photoId` (string) + optional ack callback → `{ ok, room }` or `{ ok:false, error }` | joins room `photo:<photoId>` |
+| `photo:leave` | client → server | `photoId` + optional ack → `{ ok }` | leaves that room |
+| `comment:new` | server → client | the same comment JSON as the REST `POST /api/photos/:id/comments` response: `{ _id, photoId, comment, dateTime, user:{ _id, firstName, lastName } }` | only room `photo:<photoId>` |
+| `photo:new` | server → client | the same photo JSON as the REST `POST /api/photos` response (`_id, userId, user, imageUrl, title, description, dateTime, commentCount`) | **all** connected clients |
+| `photo:deleted` | server → client | `{ photoId }` | **all** connected clients (the photo's room is emptied afterwards) |
+
+*Rooms vs namespaces vs broadcast:* a **namespace** is a separate endpoint (e.g. `/admin`) with its own connection logic; a **room** is a server-side group inside one namespace that sockets join/leave; **broadcast** (`io.emit`) goes to everybody. This project uses the default namespace, rooms for comments and broadcast for photo events.
+
+## Client side
+
+| File | Role |
+|---|---|
+| `client/src/services/socket.js` | One shared connection with a reference counter (no duplicates under `React.StrictMode`; closed when nobody uses it) |
+| `client/src/useRealtime.js` | `usePhotoRoom(photoId, handlers)` (join/leave room, `comment:new`, status, resync) and `usePhotoFeed(handlers)` (`photo:new`, `photo:deleted`) |
+| `client/src/components/LiveStatus.jsx` | "Live" / "Connecting…" / "Reconnecting…" indicator |
+| `client/src/components/LiveNotifier.jsx` | Toast when *someone else* uploads a photo, on any page |
+| `client/src/pages/PhotoDetail.jsx` | Uses the room hook; de-duplicates by comment `_id` |
+| `client/src/pages/Gallery.jsx`, `Home.jsx` | New photo appears at the top (highlighted); deleted photo disappears |
+
+- **No duplicates:** the author receives the comment from the REST response *and* from the event; both go through the same `addComment`, which ignores an `_id` that is already in the list.
+- **Cleanup:** on unmount (or when the photo id changes) the effect removes every listener, emits `photo:leave` and releases the socket; the connection closes 300 ms after the last user released it.
+- **Reconnection:** rooms are lost when a connection drops, so the hook re-joins on every `connect` event. After a *re*-join it re-fetches the photo over REST to recover comments missed while offline.
+- **Socket unavailable:** the indicator shows "Reconnecting…" while the page keeps working over REST; nothing throws.
+- **Known limitation:** comment counters on gallery cards are not live (they refresh on the next load).
+
+## Setup for the new technology
+
+```bash
+cd server && npm install        # adds socket.io (and socket.io-client for tests)
+cd ../client && npm install     # adds socket.io-client
+```
+
+## Environment variables
+
+No new variables. Socket.io reuses the existing ones:
+
+| Variable | Used for |
+|---|---|
+| `CLIENT_ORIGIN` (server) | Allowed origin for both REST CORS **and** the Socket.io handshake |
+| `VITE_API_URL` (client, optional) | If set, the socket connects to that URL instead of the current origin (same as `api.js`) |
+
+In development the Vite proxy forwards `/socket.io` (with `ws: true`), so no backend URL is hard-coded.
+
+## Run the full stack
+
+```bash
+# terminal 1 - MongoDB must be running
+cd server && npm run dev        # API + Socket.io on http://localhost:5000
+# terminal 2
+cd client && npm run dev        # http://localhost:5173
+```
+
+Try it: open the same photo in two browsers (or one normal + one private window), log in as two users, post a comment in one — it appears in the other without a reload, and the pill above the comments says **Live**. Stop the server to see **Reconnecting…**; start it again and it returns to **Live**.
+
+## How to test
+
+```bash
+cd server
+npm test        # API tests + Socket.io tests, run one file at a time (--test-concurrency=1)
+```
+
+`tests/socket.test.js` (real Express + Socket.io + MongoDB + `socket.io-client`) covers: two clients in one room both get `comment:new` with a payload identical to the REST response; a client in another room / no room gets nothing; invalid ids are rejected; case-insensitive room ids; a client that left stops receiving; the 10-room limit; events sent by clients are ignored (REST is the only write path); failed REST writes emit nothing; `photo:new` reaches every client and equals the REST payload; `photo:deleted` is broadcast and the room emptied; a forbidden delete emits nothing. The existing API tests run unchanged (they use an app without Socket.io, which also proves REST works without it).
+
+## Project 4 compliance checklist
+
+| Requirement | Status |
+|---|---|
+| Socket.io server integrated with Express (same HTTP server) | ✔ `server/server.js`, `server/socket/index.js` |
+| New comment appears instantly for all connected clients | ✔ `comment:new` |
+| (Optional) live notification on photo upload | ✔ `photo:new` toast + live card in Gallery/Home |
+| Client connection in React via `useEffect` | ✔ `useRealtime.js`, `services/socket.js` |
+| Room-based broadcasting per photo detail page | ✔ room `photo:<id>` |
+| Cleanup on unmount, multiple simultaneous clients | ✔ listeners removed, room left, ref-counted socket |
+| Project 3 features still work | ✔ REST untouched; sockets are additive |
+| Toolbar shows "Hi <firstName>" / "Please Login" | ✔ `Navbar.jsx` |
+| 3-tier architecture, data tier unchanged | ✔ no model changes |
+| No meta-frameworks; hand-written integration | ✔ |
+| Secrets only in `.env`; validation maintained | ✔ no new secrets; Joi/JWT still guard every write |
+| New UI is responsive | ✔ indicator wraps in `.section-head`, toasts limited to viewport width |
+| README: track, rationale, setup, env variables, how to run | ✔ this section |
+| Meaningful Git history on branch `feature/websocket-comments` | ✔ one commit per area |

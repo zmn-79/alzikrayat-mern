@@ -1,14 +1,32 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAsync } from '../hooks';
+import { usePhotoFeed } from '../useRealtime';
 import { useAuth } from '../context/AuthContext';
 import PhotoCard from '../components/PhotoCard';
 import { Alert, EmptyState, Spinner } from '../components/Feedback';
 
 export default function Home() {
   const { isAuthenticated } = useAuth();
-  const { loading, error, data, reload } = useAsync((signal) => api.getPhotos(signal), []);
+  const { loading, error, data, setData, reload } = useAsync((signal) => api.getPhotos(signal), []);
   const photos = data?.photos || [];
+  const [freshIds, setFreshIds] = useState([]); // cards that arrived live (briefly highlighted)
+
+  // Live updates: stats and "Recent memories" follow uploads/deletions without a refresh.
+  usePhotoFeed({
+    onNew: (photo) => {
+      setData((d) => (!d || d.photos.some((p) => p._id === photo._id)
+        ? d
+        : { ...d, count: d.count + 1, photos: [photo, ...d.photos] }));
+      setFreshIds((ids) => [...ids, photo._id]);
+    },
+    onDeleted: ({ photoId }) => setData((d) => (!d ? d : {
+      ...d,
+      count: d.photos.filter((p) => p._id !== photoId).length,
+      photos: d.photos.filter((p) => p._id !== photoId),
+    })),
+  });
 
   // Stats are computed from real API data (no hard-coded numbers).
   const contributors = new Set(photos.map((p) => p.userId)).size;
@@ -53,7 +71,7 @@ export default function Home() {
             </Link>
           </EmptyState>
         )}
-        <div className="grid">{photos.slice(0, 6).map((p) => <PhotoCard key={p._id} photo={p} />)}</div>
+        <div className="grid">{photos.slice(0, 6).map((p) => <PhotoCard key={p._id} photo={p} highlight={freshIds.includes(p._id)} />)}</div>
       </section>
     </>
   );
