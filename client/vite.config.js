@@ -13,6 +13,8 @@ export default defineConfig({
     proxy: {
       '/api': { target: API, changeOrigin: true },
       '/uploads': { target: API, changeOrigin: true },
+      // Socket.io: ws:true lets the WebSocket upgrade pass through the proxy.
+      '/socket.io': { target: API, changeOrigin: true, ws: true },
     },
   },
 });

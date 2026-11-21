@@ -3,6 +3,7 @@ const path = require('path');
 const Photo = require('../models/Photo');
 const Comment = require('../models/Comment');
 const { UPLOAD_DIR } = require('../middleware/upload');
+const { emitPhotoNew, emitPhotoDeleted } = require('../socket');
 
 const AUTHOR_FIELDS = 'firstName lastName';
 
@@ -81,7 +82,9 @@ exports.create = async (req, res, next) => {
       description: description || '',
     });
     await photo.populate('userId', AUTHOR_FIELDS);
-    res.status(201).json({ success: true, message: 'Photo uploaded', photo: toPhotoDTO(photo, 0) });
+    const dto = toPhotoDTO(photo, 0);
+    emitPhotoNew(dto); // live notification for every connected client
+    res.status(201).json({ success: true, message: 'Photo uploaded', photo: dto });
   } catch (err) {
     // Don't leave an orphaned file on disk if the DB write fails.
     if (req.file) fs.unlink(req.file.path, () => {});
@@ -105,6 +108,7 @@ exports.remove = async (req, res, next) => {
     // path.basename guards against a tampered fileName escaping the uploads dir
     fs.unlink(path.join(UPLOAD_DIR, path.basename(photo.fileName)), () => {});
 
+    emitPhotoDeleted(photo._id); // open pages can react (remove the card / show a notice)
     res.json({ success: true, message: 'Photo deleted' });
   } catch (err) {
     next(err);

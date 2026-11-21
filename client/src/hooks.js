@@ -21,5 +21,11 @@ export function useAsync(loader, deps) {
   }, [...deps, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { ...state, reload, setData: (data) => setState((s) => ({ ...s, data })) };
+  // setData accepts a value OR an updater function, so several live events
+  // arriving in the same tick each build on the latest data (no lost updates).
+  const setData = useCallback(
+    (next) => setState((s) => ({ ...s, data: typeof next === 'function' ? next(s.data) : next })),
+    [],
+  );
+  return { ...state, reload, setData };
 }

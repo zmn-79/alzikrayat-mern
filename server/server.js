@@ -1,8 +1,10 @@
 require('dotenv').config();
 const path = require('path');
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const { initSocket } = require('./socket');
 const authRoutes = require('./routes/authRoutes');
 const photoRoutes = require('./routes/photoRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
@@ -32,7 +34,10 @@ app.use(errorHandler);
 async function start() {
   await connectDB();
   const port = process.env.PORT || 5000;
-  app.listen(port, () => console.log(`Alzikrayat API listening on http://localhost:${port}`));
+  // Express and Socket.io share ONE http server (and therefore one port).
+  const httpServer = http.createServer(app);
+  initSocket(httpServer);
+  httpServer.listen(port, () => console.log(`Alzikrayat API + Socket.io listening on http://localhost:${port}`));
 }
 
 if (require.main === module) {

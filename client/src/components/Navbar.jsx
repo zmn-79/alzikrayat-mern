@@ -41,12 +41,12 @@ export default function Navbar() {
           <span className="nav-spacer" />
           {isAuthenticated ? (
             <>
-              <span className="nav-user">Hi, {user.firstName}</span>
+              <span className="nav-user">Hi {user.firstName}</span>
               <button className="btn btn-outline btn-sm" onClick={handleLogout}>Log out</button>
             </>
           ) : (
             <>
-              <NavLink to="/login" onClick={close}>Log in</NavLink>
+              <NavLink to="/login" onClick={close}>Please Login</NavLink>
               <Link to="/register" className="btn btn-primary btn-sm" onClick={close}>Sign up</Link>
             </>
           )}

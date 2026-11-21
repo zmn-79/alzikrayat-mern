@@ -2,9 +2,10 @@ import { Link } from 'react-router-dom';
 import { imageSrc } from '../services/api';
 import { formatDate, fullName } from '../utils';
 
-export default function PhotoCard({ photo }) {
+// `highlight` briefly outlines a card that just arrived through a live update.
+export default function PhotoCard({ photo, highlight = false }) {
   return (
-    <article className="card photo-card">
+    <article className={`card photo-card${highlight ? ' is-new' : ''}`}>
       <Link to={`/photos/${photo._id}`} className="photo-thumb" aria-label={`Open ${photo.title}`}>
         <img src={imageSrc(photo.imageUrl)} alt={photo.title} loading="lazy" />
       </Link>
